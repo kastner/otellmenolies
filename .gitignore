@@ -1,0 +1,9 @@
+.DS_Store
+.env
+.turbo
+node_modules
+dist
+build
+coverage
+data
+.worktrees
