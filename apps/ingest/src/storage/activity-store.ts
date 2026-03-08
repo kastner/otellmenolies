@@ -49,6 +49,43 @@ export type ActivityStore = {
 };
 
 export function createActivityStore(database: SqliteDatabase): ActivityStore {
+  // One-time backfill: populate agent_events from existing spans.
+  // Uses INSERT OR IGNORE so the source_id UNIQUE constraint deduplicates
+  // against rows already inserted via the live insertFromSpans path.
+  database.exec(`
+    INSERT OR IGNORE INTO agent_events (
+      source_id, timestamp_ms, service_name, event_type,
+      session_id, model, input_tokens, output_tokens,
+      cache_read_tokens, cache_creation_tokens, cost_usd,
+      duration_ms, tool_name, tool_success, attributes_json
+    )
+    SELECT
+      'span:' || span_id || ':api',
+      start_time_ms, service_name, 'api_request', session_id,
+      NULL, COALESCE(input_tokens, 0), COALESCE(output_tokens, 0),
+      0, 0, NULL, duration_ms, NULL, NULL,
+      json_object('spanName', span_name)
+    FROM spans
+    WHERE input_tokens IS NOT NULL OR output_tokens IS NOT NULL
+  `);
+
+  database.exec(`
+    INSERT OR IGNORE INTO agent_events (
+      source_id, timestamp_ms, service_name, event_type,
+      session_id, model, input_tokens, output_tokens,
+      cache_read_tokens, cache_creation_tokens, cost_usd,
+      duration_ms, tool_name, tool_success, attributes_json
+    )
+    SELECT
+      'span:' || span_id || ':tool',
+      start_time_ms, service_name, 'tool_call', session_id,
+      NULL, 0, 0, 0, 0, NULL, duration_ms,
+      tool_name, NULL,
+      json_object('toolCallId', tool_call_id, 'arguments', tool_arguments)
+    FROM spans
+    WHERE tool_name IS NOT NULL
+  `);
+
   const insertStatement = database.prepare(`
     INSERT OR IGNORE INTO agent_events (
       source_id, timestamp_ms, service_name, event_type,
@@ -258,6 +295,28 @@ export function createActivityStore(database: SqliteDatabase): ActivityStore {
             serviceName: log.serviceName,
             sessionId,
             sourceId: `log:${sessionId}:${seq}:api`,
+            timestampMs: log.timestampMs,
+            toolName: null,
+            toolSuccess: null,
+          });
+        } else if (eventName === "codex.sse_event" && attrs["event.kind"] === "response.completed") {
+          const seq = attrs["event.sequence"] ?? String(log.timestampMs);
+          rows.push({
+            attributesJson: JSON.stringify({
+              model: attrs["model"] ?? attrs["slug"],
+              conversationId: attrs["conversation.id"],
+            }),
+            cacheCreationTokens: 0,
+            cacheReadTokens: parseInt(String(attrs["cached_token_count"] ?? "0"), 10) || 0,
+            costUsd: null,
+            durationMs: parseFloat(attrs["duration_ms"] ?? "0") || null,
+            eventType: "api_request",
+            inputTokens: parseInt(attrs["input_token_count"] ?? "0", 10) || 0,
+            model: attrs["model"] ?? attrs["slug"] ?? null,
+            outputTokens: parseInt(attrs["output_token_count"] ?? "0", 10) || 0,
+            serviceName: log.serviceName,
+            sessionId,
+            sourceId: `log:${sessionId}:${seq}:sse`,
             timestampMs: log.timestampMs,
             toolName: null,
             toolSuccess: null,
