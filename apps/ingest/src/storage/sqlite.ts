@@ -54,6 +54,31 @@ export function createSqliteDatabase(filePath: string): SqliteDatabase {
     CREATE INDEX IF NOT EXISTS spans_tool_name_idx ON spans(tool_name);
   `);
 
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS agent_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id TEXT NOT NULL UNIQUE,
+      timestamp_ms INTEGER NOT NULL,
+      service_name TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      session_id TEXT,
+      model TEXT,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      cache_read_tokens INTEGER DEFAULT 0,
+      cache_creation_tokens INTEGER DEFAULT 0,
+      cost_usd REAL,
+      duration_ms REAL,
+      tool_name TEXT,
+      tool_success INTEGER,
+      attributes_json TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS agent_events_timestamp_idx ON agent_events(timestamp_ms);
+    CREATE INDEX IF NOT EXISTS agent_events_service_idx ON agent_events(service_name);
+    CREATE INDEX IF NOT EXISTS agent_events_event_type_idx ON agent_events(event_type);
+    CREATE INDEX IF NOT EXISTS agent_events_session_idx ON agent_events(session_id);
+  `);
+
   pruneCodexNoise(database);
 
   return database;

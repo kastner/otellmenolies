@@ -8,6 +8,7 @@ import { createMetricArchiveStore } from "./metrics/archive-store.js";
 import { createMetricProfileAdvisor } from "./metrics/profile-advisor.js";
 import { loadOtelDefinitions } from "./otel/load-protos.js";
 import { createReceiverShape } from "./otel/receiver.js";
+import { createActivityStore } from "./storage/activity-store.js";
 import { createSpanStore } from "./storage/span-store.js";
 import { createSqliteDatabase } from "./storage/sqlite.js";
 
@@ -23,6 +24,7 @@ export function createServer(config: AppConfig): AppServer {
     logsDir: config.logsDir
   });
   const spans = createSpanStore(database);
+  const activity = createActivityStore(database);
   const metrics = createMetricArchiveStore({
     advisor: createMetricProfileAdvisor({
       apiKey: config.openAiApiKey,
@@ -33,12 +35,14 @@ export function createServer(config: AppConfig): AppServer {
   const ingestBuffer = createBufferedIngest({
     flushLogs: async (logExport) => {
       await logs.ingestLogs(logExport);
+      activity.insertFromLogs(logExport);
     },
     flushMetrics: async (metricExport) => {
       await metrics.ingestMetrics(metricExport);
     },
     flushSpans: (traceExport) => {
       spans.insertSpans(traceExport);
+      activity.insertFromSpans(traceExport);
     }
   });
   const receiver = createReceiverShape({
@@ -56,6 +60,7 @@ export function createServer(config: AppConfig): AppServer {
   const httpServer = Fastify();
 
   registerApiRoutes(httpServer, {
+    activity,
     metrics,
     spans
   });

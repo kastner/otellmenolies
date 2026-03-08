@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
+import type { ActivityStore } from "../storage/activity-store.js";
 import type { SpanStore } from "../storage/span-store.js";
 import type { createMetricArchiveStore } from "../metrics/archive-store.js";
 
@@ -29,6 +30,7 @@ const toolUsageQuerySchema = z.object({
 export function registerApiRoutes(
   app: FastifyInstance,
   dependencies: {
+    activity?: ActivityStore;
     metrics?: ReturnType<typeof createMetricArchiveStore>;
     spans: SpanStore;
   }
@@ -107,6 +109,20 @@ export function registerApiRoutes(
     return {
       spans: dependencies.spans.getTrace(params.traceId)
     };
+  });
+
+  app.get("/api/agent/unified", async (request) => {
+    const query = bucketedRangeQuerySchema.parse(request.query);
+    const range = resolveRange(query.range);
+
+    if (!dependencies.activity) {
+      return { byService: [], inputTokenTimeline: [], outputTokenTimeline: [], summary: { cacheReadTokens: 0, inputTokens: 0, outputTokens: 0, toolCallCount: 0, totalCostUsd: 0 }, toolCallTimeline: [], tools: [] };
+    }
+
+    return dependencies.activity.getUnifiedOverview({
+      ...range,
+      bucketSizeSeconds: query.bucket
+    });
   });
 
   app.get("/api/metrics/catalog", async () => ({
