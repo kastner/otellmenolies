@@ -309,4 +309,150 @@ describe("trace export decoding", () => {
     expect(spans).toHaveLength(1);
     expect(spans[0]?.spanName).toBe("exec_command");
   });
+
+  it("extracts token usage and codex tool payload details for agent dashboards", () => {
+    const spans = extractSpansFromTraceExport({
+      resourceSpans: [
+        {
+          resource: {
+            attributes: [
+              {
+                key: "service.name",
+                value: {
+                  stringValue: "codex-app-server"
+                }
+              }
+            ]
+          },
+          scopeSpans: [
+            {
+              spans: [
+                {
+                  attributes: [
+                    {
+                      key: "conversation.id",
+                      value: {
+                        stringValue: "conv-1"
+                      }
+                    },
+                    {
+                      key: "gen_ai.usage.input_tokens",
+                      value: {
+                        intValue: "1200"
+                      }
+                    },
+                    {
+                      key: "gen_ai.usage.output_tokens",
+                      value: {
+                        intValue: "350"
+                      }
+                    },
+                    {
+                      key: "tool_name",
+                      value: {
+                        stringValue: "exec_command"
+                      }
+                    },
+                    {
+                      key: "call",
+                      value: {
+                        stringValue:
+                          'ToolCall { tool_name: "exec_command", call_id: "call-123", payload: Function { arguments: "{\\"cmd\\":\\"ls\\",\\"workdir\\":\\"/tmp\\"}" } }'
+                      }
+                    }
+                  ],
+                  endTimeUnixNano: "8000000",
+                  kind: "SPAN_KIND_INTERNAL",
+                  name: "handle_tool_call",
+                  spanId: Buffer.from("tool1234"),
+                  startTimeUnixNano: "5000000",
+                  traceId: Buffer.from("trace-agent-0001")
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(spans[0]).toMatchObject({
+      conversationId: "conv-1",
+      inputTokens: 1200,
+      outputTokens: 350,
+      toolArguments: '{\n  "cmd": "ls",\n  "workdir": "/tmp"\n}',
+      toolCallId: "call-123",
+      toolName: "exec_command"
+    });
+  });
+
+  it("drops duplicate codex tool bookkeeping spans without canonical payload data", () => {
+    const spans = extractSpansFromTraceExport({
+      resourceSpans: [
+        {
+          resource: {
+            attributes: [
+              {
+                key: "service.name",
+                value: {
+                  stringValue: "codex-app-server"
+                }
+              }
+            ]
+          },
+          scopeSpans: [
+            {
+              spans: [
+                {
+                  attributes: [
+                    {
+                      key: "tool_name",
+                      value: {
+                        stringValue: "exec_command"
+                      }
+                    }
+                  ],
+                  endTimeUnixNano: "2000000",
+                  kind: "SPAN_KIND_INTERNAL",
+                  name: "handle_responses",
+                  spanId: Buffer.from("dropdup1"),
+                  startTimeUnixNano: "1000000",
+                  traceId: Buffer.from("trace-dupe-tool01")
+                },
+                {
+                  attributes: [
+                    {
+                      key: "tool_name",
+                      value: {
+                        stringValue: "exec_command"
+                      }
+                    },
+                    {
+                      key: "call",
+                      value: {
+                        stringValue:
+                          'ToolCall { tool_name: "exec_command", call_id: "call-keep-1", payload: Function { arguments: "{\\"cmd\\":\\"pwd\\"}" } }'
+                      }
+                    }
+                  ],
+                  endTimeUnixNano: "3000000",
+                  kind: "SPAN_KIND_INTERNAL",
+                  name: "handle_tool_call",
+                  spanId: Buffer.from("keepdup1"),
+                  startTimeUnixNano: "1000000",
+                  traceId: Buffer.from("trace-dupe-tool01")
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(spans).toHaveLength(1);
+    expect(spans[0]).toMatchObject({
+      spanName: "handle_tool_call",
+      toolArguments: '{\n  "cmd": "pwd"\n}',
+      toolCallId: "call-keep-1"
+    });
+  });
 });

@@ -1,7 +1,10 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import type { SpanStore } from "../storage/span-store.js";
 import type { createMetricArchiveStore } from "../metrics/archive-store.js";
+
+const allowedOriginPattern = /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/i;
+const allowedMethods = "GET, POST, OPTIONS";
 
 const rangeQuerySchema = z.object({
   range: z.coerce.number().positive().default(3600)
@@ -12,6 +15,17 @@ const traceQuerySchema = z.object({
   range: z.coerce.number().positive().default(3600)
 });
 
+const bucketedRangeQuerySchema = z.object({
+  bucket: z.coerce.number().int().positive().max(3600).default(300),
+  range: z.coerce.number().positive().default(3600)
+});
+
+const toolUsageQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(50).default(12),
+  range: z.coerce.number().positive().default(3600),
+  toolName: z.string().min(1).optional()
+});
+
 export function registerApiRoutes(
   app: FastifyInstance,
   dependencies: {
@@ -19,6 +33,24 @@ export function registerApiRoutes(
     spans: SpanStore;
   }
 ) {
+  app.addHook("onRequest", async (request, reply) => {
+    const origin = request.headers.origin;
+
+    if (origin && allowedOriginPattern.test(origin)) {
+      setCorsHeaders(request.headers["access-control-request-headers"], origin, reply);
+    }
+
+    if (request.method === "OPTIONS") {
+      if (origin && allowedOriginPattern.test(origin)) {
+        return reply.code(204).send();
+      }
+
+      return reply.code(403).send({
+        error: "Origin not allowed"
+      });
+    }
+  });
+
   app.get("/api/overview", async (request) => {
     const query = rangeQuerySchema.parse(request.query);
     const range = resolveRange(query.range);
@@ -33,6 +65,27 @@ export function registerApiRoutes(
     return {
       sessions: dependencies.spans.listSessions(range)
     };
+  });
+
+  app.get("/api/agent/overview", async (request) => {
+    const query = bucketedRangeQuerySchema.parse(request.query);
+    const range = resolveRange(query.range);
+
+    return dependencies.spans.getAgentOverview({
+      ...range,
+      bucketSizeSeconds: query.bucket
+    });
+  });
+
+  app.get("/api/agent/tools", async (request) => {
+    const query = toolUsageQuerySchema.parse(request.query);
+    const range = resolveRange(query.range);
+
+    return dependencies.spans.getToolUsage({
+      ...range,
+      limit: query.limit,
+      toolName: query.toolName
+    });
   });
 
   app.get("/api/traces", async (request) => {
@@ -92,4 +145,19 @@ function resolveRange(rangeSeconds: number) {
     endTimeMs,
     startTimeMs
   };
+}
+
+function setCorsHeaders(
+  requestedHeaders: string | undefined,
+  origin: string,
+  reply: FastifyReply
+) {
+  reply.header("Access-Control-Allow-Origin", origin);
+  reply.header("Access-Control-Allow-Methods", allowedMethods);
+  reply.header(
+    "Access-Control-Allow-Headers",
+    requestedHeaders || "content-type, authorization"
+  );
+  reply.header("Access-Control-Max-Age", "600");
+  reply.header("Vary", "Origin");
 }

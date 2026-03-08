@@ -26,17 +26,84 @@ export function createSqliteDatabase(filePath: string): SqliteDatabase {
       duration_ms REAL NOT NULL,
       status_code TEXT NOT NULL,
       session_id TEXT,
+      conversation_id TEXT,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
       tool_name TEXT,
+      tool_call_id TEXT,
+      tool_arguments TEXT,
       peer_service TEXT,
       attributes_json TEXT NOT NULL,
       resource_attributes_json TEXT NOT NULL
     );
+  `);
+
+  ensureColumn(database, "spans", "conversation_id", "TEXT");
+  ensureColumn(database, "spans", "input_tokens", "INTEGER");
+  ensureColumn(database, "spans", "output_tokens", "INTEGER");
+  ensureColumn(database, "spans", "tool_call_id", "TEXT");
+  ensureColumn(database, "spans", "tool_arguments", "TEXT");
+
+  database.exec(`
     CREATE INDEX IF NOT EXISTS spans_start_time_idx ON spans(start_time_ms);
     CREATE INDEX IF NOT EXISTS spans_trace_idx ON spans(trace_id);
     CREATE INDEX IF NOT EXISTS spans_service_idx ON spans(service_name);
     CREATE INDEX IF NOT EXISTS spans_session_idx ON spans(session_id);
+    CREATE INDEX IF NOT EXISTS spans_conversation_idx ON spans(conversation_id);
     CREATE INDEX IF NOT EXISTS spans_category_idx ON spans(category);
+    CREATE INDEX IF NOT EXISTS spans_tool_name_idx ON spans(tool_name);
   `);
 
+  pruneCodexNoise(database);
+
   return database;
+}
+
+function ensureColumn(
+  database: SqliteDatabase,
+  tableName: string,
+  columnName: string,
+  columnDefinition: string
+) {
+  const columns = database
+    .prepare(`PRAGMA table_info(${tableName})`)
+    .all() as Array<{ name: string }>;
+
+  if (columns.some((column) => column.name === columnName)) {
+    return;
+  }
+
+  database.exec(
+    `ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`
+  );
+}
+
+function pruneCodexNoise(database: SqliteDatabase) {
+  const removedRows = database
+    .prepare(
+      `
+        DELETE FROM spans
+        WHERE service_name = 'codex-app-server'
+          AND (
+            category = 'app'
+            OR (
+              category = 'tool_call'
+              AND tool_name IS NULL
+              AND tool_call_id IS NULL
+              AND tool_arguments IS NULL
+            )
+            OR (
+              category = 'tool_call'
+              AND span_name = 'handle_responses'
+              AND tool_arguments IS NULL
+              AND tool_call_id IS NULL
+            )
+          )
+      `
+    )
+    .run().changes;
+
+  if (removedRows > 0) {
+    database.pragma("wal_checkpoint(TRUNCATE)");
+  }
 }

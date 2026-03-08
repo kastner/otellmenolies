@@ -161,6 +161,10 @@ td {
   margin-bottom: 16px;
 }
 
+.summary-strip-wide {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .stat-block,
 .panel,
 .metric-row {
@@ -203,6 +207,152 @@ td {
   margin: 0 0 12px;
 }
 
+.panel-header {
+  align-items: start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.panel-header h3 {
+  margin-bottom: 4px;
+}
+
+.panel-header p {
+  color: #7b6750;
+  font-size: 13px;
+  margin: 0;
+}
+
+.trend-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.trend-value {
+  font-size: 22px;
+}
+
+.trend-chart {
+  background:
+    linear-gradient(180deg, rgba(233, 188, 126, 0.18), rgba(255, 253, 250, 0)),
+    #fffaf3;
+  border: 1px solid #f0e2cc;
+  border-radius: 12px;
+  height: 120px;
+  padding: 10px;
+}
+
+.trend-chart svg {
+  height: 100%;
+  width: 100%;
+}
+
+.trend-chart polyline,
+.metric-chart polyline {
+  fill: none;
+  stroke: #9a4d12;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 4;
+}
+
+.agent-detail-grid {
+  margin-top: 16px;
+}
+
+.tool-ranking {
+  display: grid;
+  gap: 10px;
+}
+
+.tool-row {
+  align-items: center;
+  background: #fffaf3;
+  border: 1px solid #eadfcd;
+  border-radius: 12px;
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+  padding: 14px 14px 10px;
+  position: relative;
+  text-align: left;
+}
+
+.tool-row.is-selected {
+  border-color: #9a4d12;
+  box-shadow: inset 0 0 0 1px rgba(154, 77, 18, 0.18);
+}
+
+.tool-row-meta {
+  display: grid;
+  gap: 4px;
+  position: relative;
+  z-index: 1;
+}
+
+.tool-row-meta span {
+  color: #7b6750;
+  font-size: 13px;
+}
+
+.tool-row-bar {
+  background: linear-gradient(90deg, #c96d28, #e6b178);
+  border-radius: 999px;
+  display: block;
+  height: 8px;
+}
+
+.tool-call-list {
+  display: grid;
+  gap: 12px;
+}
+
+.tool-call-card {
+  background: #fffaf3;
+  border: 1px solid #eadfcd;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.tool-call-meta {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 12px;
+}
+
+.tool-call-meta span {
+  color: #7b6750;
+  display: block;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.tool-call-meta strong {
+  overflow-wrap: anywhere;
+}
+
+.argument-block,
+.empty-panel {
+  background: #2d241d;
+  border-radius: 10px;
+  color: #f9f2e8;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  overflow-x: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
+.empty-panel {
+  color: #d6cab9;
+}
+
 .metric-list {
   display: grid;
   gap: 12px;
@@ -235,14 +385,6 @@ td {
   width: 100%;
 }
 
-.metric-chart polyline {
-  fill: none;
-  stroke: #9a4d12;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 4;
-}
-
 .metric-value {
   font-size: 16px;
   font-weight: 700;
@@ -267,6 +409,11 @@ td {
   .summary-strip,
   .panel-grid,
   .metric-row {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-strip-wide,
+  .tool-call-meta {
     grid-template-columns: 1fr;
   }
 

@@ -245,4 +245,232 @@ describe("span store", () => {
     });
     expect(overview.summary.sessionCount).toBe(1);
   });
+
+  it("builds agent timelines and tool drilldown data", () => {
+    const database = createSqliteDatabase(path.join(tempDir, "telemetry.sqlite"));
+    const store = createSpanStore(database);
+
+    store.insertSpans([
+      {
+        attributes: {
+          "conversation.id": "conv-1",
+          "gen_ai.usage.input_tokens": 1000
+        },
+        category: "agent_session",
+        conversationId: "conv-1",
+        durationMs: 800,
+        inputTokens: 1000,
+        kind: "SPAN_KIND_INTERNAL",
+        parentSpanId: undefined,
+        resourceAttributes: {
+          "service.name": "codex-app-server"
+        },
+        serviceName: "codex-app-server",
+        sessionId: "conv-1",
+        spanId: "conv-root-1",
+        spanName: "turn/start",
+        startTimeMs: 10_000,
+        statusCode: "STATUS_CODE_UNSET",
+        toolArguments: undefined,
+        toolCallId: undefined,
+        toolName: undefined,
+        traceId: "trace-conv-1"
+      },
+      {
+        attributes: {
+          "conversation.id": "conv-1",
+          "gen_ai.usage.output_tokens": 250,
+          "tool.name": "exec_command"
+        },
+        category: "tool_call",
+        conversationId: "conv-1",
+        durationMs: 300,
+        inputTokens: undefined,
+        kind: "SPAN_KIND_INTERNAL",
+        outputTokens: 250,
+        parentSpanId: "conv-root-1",
+        resourceAttributes: {
+          "service.name": "codex-app-server"
+        },
+        serviceName: "codex-app-server",
+        sessionId: "conv-1",
+        spanId: "tool-call-1",
+        spanName: "handle_tool_call",
+        startTimeMs: 11_000,
+        statusCode: "STATUS_CODE_UNSET",
+        toolArguments: '{\n  "cmd": "ls"\n}',
+        toolCallId: "call-1",
+        toolName: "exec_command",
+        traceId: "trace-conv-1"
+      },
+      {
+        attributes: {
+          "conversation.id": "conv-2",
+          "gen_ai.usage.input_tokens": 400,
+          "tool.name": "write_stdin"
+        },
+        category: "tool_call",
+        conversationId: "conv-2",
+        durationMs: 120,
+        inputTokens: 400,
+        kind: "SPAN_KIND_INTERNAL",
+        outputTokens: undefined,
+        parentSpanId: undefined,
+        resourceAttributes: {
+          "service.name": "codex-app-server"
+        },
+        serviceName: "codex-app-server",
+        sessionId: "conv-2",
+        spanId: "tool-call-2",
+        spanName: "handle_tool_call",
+        startTimeMs: 16_000,
+        statusCode: "STATUS_CODE_UNSET",
+        toolArguments: '{\n  "chars": "hello"\n}',
+        toolCallId: "call-2",
+        toolName: "write_stdin",
+        traceId: "trace-conv-2"
+      }
+    ]);
+
+    const agentOverview = store.getAgentOverview({
+      bucketSizeSeconds: 10,
+      endTimeMs: 30_000,
+      startTimeMs: 0
+    });
+    const toolUsage = store.getToolUsage({
+      endTimeMs: 30_000,
+      limit: 10,
+      startTimeMs: 0,
+      toolName: "exec_command"
+    });
+
+    expect(agentOverview.summary).toMatchObject({
+      conversationCount: 2,
+      inputTokens: 1400,
+      outputTokens: 250,
+      toolCallCount: 2
+    });
+    expect(agentOverview.conversationTimeline).toEqual([
+      { bucketStartMs: 0, value: 0 },
+      { bucketStartMs: 10_000, value: 2 },
+      { bucketStartMs: 20_000, value: 0 }
+    ]);
+    expect(agentOverview.inputTokenTimeline).toEqual([
+      { bucketStartMs: 0, value: 0 },
+      { bucketStartMs: 10_000, value: 1400 },
+      { bucketStartMs: 20_000, value: 0 }
+    ]);
+    expect(agentOverview.outputTokenTimeline).toEqual([
+      { bucketStartMs: 0, value: 0 },
+      { bucketStartMs: 10_000, value: 250 },
+      { bucketStartMs: 20_000, value: 0 }
+    ]);
+    expect(agentOverview.durationTimeline).toEqual([
+      { bucketStartMs: 0, value: 0 },
+      { bucketStartMs: 10_000, value: 500 },
+      { bucketStartMs: 20_000, value: 0 }
+    ]);
+    expect(agentOverview.conversations[0]).toMatchObject({
+      conversationId: "conv-2",
+      durationMs: 0,
+      inputTokens: 400,
+      outputTokens: 0,
+      toolCallCount: 1
+    });
+    expect(agentOverview.conversations[1]).toMatchObject({
+      conversationId: "conv-1",
+      durationMs: 1_000,
+      inputTokens: 1000,
+      outputTokens: 250,
+      toolCallCount: 1
+    });
+    expect(toolUsage.tools).toEqual([
+      {
+        avgDurationMs: 120,
+        callCount: 1,
+        lastCalledAt: 16_000,
+        toolName: "write_stdin"
+      },
+      {
+        avgDurationMs: 300,
+        callCount: 1,
+        lastCalledAt: 11_000,
+        toolName: "exec_command"
+      }
+    ]);
+    expect(toolUsage.selectedTool?.calls).toEqual([
+      expect.objectContaining({
+        arguments: '{\n  "cmd": "ls"\n}',
+        conversationId: "conv-1",
+        toolCallId: "call-1",
+        toolName: "exec_command"
+      })
+    ]);
+  });
+
+  it("prioritizes tool call instances that retain arguments over duplicate spans", () => {
+    const database = createSqliteDatabase(path.join(tempDir, "telemetry.sqlite"));
+    const store = createSpanStore(database);
+
+    store.insertSpans([
+      {
+        attributes: {
+          tool_name: "exec_command"
+        },
+        category: "tool_call",
+        conversationId: "conv-1",
+        durationMs: 180,
+        kind: "SPAN_KIND_INTERNAL",
+        parentSpanId: undefined,
+        resourceAttributes: {
+          "service.name": "codex-app-server"
+        },
+        serviceName: "codex-app-server",
+        sessionId: "conv-1",
+        spanId: "arg-call",
+        spanName: "handle_tool_call",
+        startTimeMs: 11_000,
+        statusCode: "STATUS_CODE_UNSET",
+        toolArguments: '{\n  "cmd": "ls"\n}',
+        toolCallId: "call-1",
+        toolName: "exec_command",
+        traceId: "trace-1"
+      },
+      {
+        attributes: {
+          tool_name: "exec_command"
+        },
+        category: "tool_call",
+        conversationId: "conv-1",
+        durationMs: 0,
+        kind: "SPAN_KIND_INTERNAL",
+        parentSpanId: undefined,
+        resourceAttributes: {
+          "service.name": "codex-app-server"
+        },
+        serviceName: "codex-app-server",
+        sessionId: "conv-1",
+        spanId: "bare-call",
+        spanName: "handle_responses",
+        startTimeMs: 12_000,
+        statusCode: "STATUS_CODE_UNSET",
+        toolArguments: undefined,
+        toolCallId: undefined,
+        toolName: "exec_command",
+        traceId: "trace-1"
+      }
+    ]);
+
+    const toolUsage = store.getToolUsage({
+      endTimeMs: 30_000,
+      limit: 10,
+      startTimeMs: 0,
+      toolName: "exec_command"
+    });
+
+    expect(toolUsage.selectedTool?.calls[0]).toMatchObject({
+      arguments: '{\n  "cmd": "ls"\n}',
+      toolCallId: "call-1"
+    });
+  });
 });

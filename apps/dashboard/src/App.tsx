@@ -78,21 +78,78 @@ type MetricSeriesResponse = {
   unit?: string;
 };
 
+type AgentOverviewResponse = {
+  conversationTimeline: TimelinePoint[];
+  conversations: Array<{
+    conversationId: string;
+    durationMs: number;
+    firstSeenAt: number;
+    inputTokens: number;
+    lastSeenAt: number;
+    outputTokens: number;
+    serviceName: string;
+    toolCallCount: number;
+    toolNames: string[];
+    traceCount: number;
+  }>;
+  durationTimeline: TimelinePoint[];
+  inputTokenTimeline: TimelinePoint[];
+  outputTokenTimeline: TimelinePoint[];
+  summary: {
+    conversationCount: number;
+    inputTokens: number;
+    outputTokens: number;
+    toolCallCount: number;
+  };
+};
+
+type ToolUsageResponse = {
+  selectedTool?: {
+    calls: Array<{
+      arguments?: string;
+      calledAt: number;
+      conversationId?: string;
+      durationMs: number;
+      serviceName: string;
+      spanId: string;
+      toolCallId?: string;
+      toolName: string;
+      traceId: string;
+    }>;
+    toolName: string;
+  };
+  tools: Array<{
+    avgDurationMs: number;
+    callCount: number;
+    lastCalledAt: number;
+    toolName: string;
+  }>;
+};
+
+type TimelinePoint = {
+  bucketStartMs: number;
+  value: number;
+};
+
 type DashboardData = {
+  agentOverview: AgentOverviewResponse | null;
   lastUpdatedAt: number | null;
   metricSeries: MetricSeriesResponse[];
   metricsCatalog: MetricsCatalogResponse["metrics"];
   overview: OverviewResponse | null;
   sessions: SessionsResponse["sessions"];
+  toolUsage: ToolUsageResponse | null;
   traces: TracesResponse["traces"];
 };
 
 const INITIAL_DATA: DashboardData = {
+  agentOverview: null,
   lastUpdatedAt: null,
   metricSeries: [],
   metricsCatalog: [],
   overview: null,
   sessions: [],
+  toolUsage: null,
   traces: []
 };
 
@@ -106,13 +163,22 @@ export function App({
   const [data, setData] = useState<DashboardData>(INITIAL_DATA);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedToolName, setSelectedToolName] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
+    let timeoutId: number | undefined;
+    let controller: AbortController | null = null;
 
     const load = async () => {
+      controller = new AbortController();
+
       try {
-        const next = await fetchDashboardData(apiBaseUrl);
+        const next = await fetchDashboardData(
+          apiBaseUrl,
+          selectedToolName,
+          controller.signal
+        );
 
         if (!active) {
           return;
@@ -124,6 +190,10 @@ export function App({
         });
         setError(null);
       } catch (loadError) {
+        if (controller?.signal.aborted) {
+          return;
+        }
+
         if (!active) {
           return;
         }
@@ -134,18 +204,32 @@ export function App({
       } finally {
         if (active) {
           setLoading(false);
+          timeoutId = window.setTimeout(() => {
+            void load();
+          }, refreshIntervalMs);
         }
       }
     };
 
-    load();
-    const intervalId = window.setInterval(load, refreshIntervalMs);
+    void load();
 
     return () => {
       active = false;
-      window.clearInterval(intervalId);
+      controller?.abort();
+
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
     };
-  }, [apiBaseUrl, refreshIntervalMs]);
+  }, [apiBaseUrl, refreshIntervalMs, selectedToolName]);
+
+  const averageConversationDurationMs =
+    data.agentOverview && data.agentOverview.conversations.length > 0
+      ? data.agentOverview.conversations.reduce(
+          (sum, conversation) => sum + conversation.durationMs,
+          0
+        ) / data.agentOverview.conversations.length
+      : 0;
 
   return (
     <div className="shell">
@@ -157,6 +241,7 @@ export function App({
 
         <nav className="nav">
           <a href="#services">Service telemetry</a>
+          <a href="#agent-analytics">Agent analytics</a>
           <a href="#sessions">Agent sessions</a>
           <a href="#metrics">Metric trends</a>
         </nav>
@@ -171,8 +256,8 @@ export function App({
             <dd>{formatCount(data.overview?.summary.traceCount ?? 0)}</dd>
           </div>
           <div>
-            <dt>Sessions</dt>
-            <dd>{formatCount(data.overview?.summary.sessionCount ?? 0)}</dd>
+            <dt>Conversations</dt>
+            <dd>{formatCount(data.agentOverview?.summary.conversationCount ?? 0)}</dd>
           </div>
         </dl>
       </aside>
@@ -308,6 +393,179 @@ export function App({
           </div>
         </section>
 
+        <section id="agent-analytics" className="section">
+          <div className="section-heading">
+            <h2>Agent analytics</h2>
+          </div>
+
+          <div className="summary-strip summary-strip-wide">
+            <StatBlock
+              label="Conversations"
+              value={formatCount(data.agentOverview?.summary.conversationCount ?? 0)}
+            />
+            <StatBlock
+              label="Input tokens"
+              value={formatCount(data.agentOverview?.summary.inputTokens ?? 0)}
+            />
+            <StatBlock
+              label="Output tokens"
+              value={formatCount(data.agentOverview?.summary.outputTokens ?? 0)}
+            />
+            <StatBlock
+              label="Tool calls"
+              value={formatCount(data.agentOverview?.summary.toolCallCount ?? 0)}
+            />
+          </div>
+
+          <div className="panel-grid">
+            <TrendPanel
+              title="Conversation volume"
+              subtitle="New conversations by time bucket"
+              value={formatCount(data.agentOverview?.summary.conversationCount ?? 0)}
+              points={data.agentOverview?.conversationTimeline ?? []}
+            />
+            <TrendPanel
+              title="Input tokens"
+              subtitle="Prompt and request token totals"
+              value={formatCount(data.agentOverview?.summary.inputTokens ?? 0)}
+              points={data.agentOverview?.inputTokenTimeline ?? []}
+            />
+            <TrendPanel
+              title="Output tokens"
+              subtitle="Model response token totals"
+              value={formatCount(data.agentOverview?.summary.outputTokens ?? 0)}
+              points={data.agentOverview?.outputTokenTimeline ?? []}
+            />
+            <TrendPanel
+              title="Average duration"
+              subtitle="Wall-clock conversation lifetime"
+              value={formatDurationMs(averageConversationDurationMs)}
+              points={data.agentOverview?.durationTimeline ?? []}
+            />
+          </div>
+
+          <div className="panel-grid agent-detail-grid">
+            <section className="panel">
+              <div className="panel-header">
+                <div>
+                  <h3>Tool calls</h3>
+                  <p>Click a tool to inspect recent calls and arguments.</p>
+                </div>
+              </div>
+
+              <div className="tool-ranking">
+                {(data.toolUsage?.tools ?? []).map((tool) => (
+                  <button
+                    key={tool.toolName}
+                    className={`tool-row${
+                      selectedToolName === tool.toolName ? " is-selected" : ""
+                    }`}
+                    type="button"
+                    onClick={() => {
+                      setSelectedToolName(tool.toolName);
+                    }}
+                  >
+                    <span className="tool-row-meta">
+                      <strong>{tool.toolName}</strong>
+                      <span>
+                        {formatCount(tool.callCount)} calls, avg{" "}
+                        {formatDurationMs(tool.avgDurationMs)}
+                      </span>
+                    </span>
+                    <span
+                      className="tool-row-bar"
+                      style={{
+                        width: `${resolveToolBarWidth(
+                          tool.callCount,
+                          data.toolUsage?.tools ?? []
+                        )}%`
+                      }}
+                    />
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header">
+                <div>
+                  <h3>Tool call details</h3>
+                  <p>
+                    {data.toolUsage?.selectedTool
+                      ? `Recent ${data.toolUsage.selectedTool.toolName} calls`
+                      : "Select a tool to inspect its recent call payloads."}
+                  </p>
+                </div>
+              </div>
+
+              {data.toolUsage?.selectedTool ? (
+                <div className="tool-call-list">
+                  {data.toolUsage.selectedTool.calls.map((call) => (
+                    <article
+                      key={`${call.spanId}:${call.calledAt}`}
+                      className="tool-call-card"
+                    >
+                      <div className="tool-call-meta">
+                        <div>
+                          <span>Call</span>
+                          <strong>{call.toolCallId ?? call.spanId}</strong>
+                        </div>
+                        <div>
+                          <span>Conversation</span>
+                          <strong>{call.conversationId ?? "unknown"}</strong>
+                        </div>
+                        <div>
+                          <span>Duration</span>
+                          <strong>{formatDurationMs(call.durationMs)}</strong>
+                        </div>
+                        <div>
+                          <span>Started</span>
+                          <strong>{formatTimestamp(call.calledAt)}</strong>
+                        </div>
+                      </div>
+                      <pre className="argument-block">
+                        {call.arguments ?? "no arguments recorded"}
+                      </pre>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-panel">No tool selected.</div>
+              )}
+            </section>
+          </div>
+
+          <div className="panel-grid single-column">
+            <section className="panel">
+              <h3>Recent conversations</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Conversation</th>
+                    <th>Service</th>
+                    <th>Duration</th>
+                    <th>Input</th>
+                    <th>Output</th>
+                    <th>Tools</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data.agentOverview?.conversations ?? []).map((conversation) => (
+                    <tr key={conversation.conversationId}>
+                      <td>{conversation.conversationId}</td>
+                      <td>{conversation.serviceName}</td>
+                      <td>{formatDurationMs(conversation.durationMs)}</td>
+                      <td>{formatCount(conversation.inputTokens)}</td>
+                      <td>{formatCount(conversation.outputTokens)}</td>
+                      <td>{conversation.toolNames.join(", ") || "none"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          </div>
+        </section>
+
         <section id="sessions" className="section">
           <div className="section-heading">
             <h2>Agent sessions</h2>
@@ -397,6 +655,33 @@ function StatBlock({
   );
 }
 
+function TrendPanel({
+  points,
+  subtitle,
+  title,
+  value
+}: {
+  points: TimelinePoint[];
+  subtitle: string;
+  title: string;
+  value: string;
+}) {
+  return (
+    <section className="panel trend-panel">
+      <div className="panel-header">
+        <div>
+          <h3>{title}</h3>
+          <p>{subtitle}</p>
+        </div>
+        <strong className="trend-value">{value}</strong>
+      </div>
+      <div className="trend-chart">
+        <Sparkline points={points.map((point) => point.value)} />
+      </div>
+    </section>
+  );
+}
+
 function Sparkline({ points }: { points: number[] }) {
   if (points.length === 0) {
     return <div className="sparkline-empty">no data</div>;
@@ -421,19 +706,37 @@ function Sparkline({ points }: { points: number[] }) {
   );
 }
 
-async function fetchDashboardData(apiBaseUrl: string): Promise<DashboardData> {
-  const overview = (await fetchJson(
-    `${apiBaseUrl}/api/overview?range=3600`
-  )) as OverviewResponse;
-  const traces = (await fetchJson(
-    `${apiBaseUrl}/api/traces?limit=8&range=3600`
-  )) as TracesResponse;
-  const sessions = (await fetchJson(
-    `${apiBaseUrl}/api/sessions?range=3600`
-  )) as SessionsResponse;
-  const metricsCatalog = (await fetchJson(
-    `${apiBaseUrl}/api/metrics/catalog`
-  )) as MetricsCatalogResponse;
+async function fetchDashboardData(
+  apiBaseUrl: string,
+  selectedToolName: string | null,
+  signal?: AbortSignal
+): Promise<DashboardData> {
+  const toolQuery = new URLSearchParams({
+    limit: "12",
+    range: "3600"
+  });
+
+  if (selectedToolName) {
+    toolQuery.set("toolName", selectedToolName);
+  }
+
+  const [overview, traces, sessions, metricsCatalog, agentOverview, toolUsage] =
+    (await Promise.all([
+      fetchJson(`${apiBaseUrl}/api/overview?range=3600`, signal),
+      fetchJson(`${apiBaseUrl}/api/traces?limit=8&range=3600`, signal),
+      fetchJson(`${apiBaseUrl}/api/sessions?range=3600`, signal),
+      fetchJson(`${apiBaseUrl}/api/metrics/catalog`, signal),
+      fetchJson(`${apiBaseUrl}/api/agent/overview?range=3600&bucket=300`, signal),
+      fetchJson(`${apiBaseUrl}/api/agent/tools?${toolQuery.toString()}`, signal)
+    ])) as [
+      OverviewResponse,
+      TracesResponse,
+      SessionsResponse,
+      MetricsCatalogResponse,
+      AgentOverviewResponse,
+      ToolUsageResponse
+    ];
+
   const metricSeries = await Promise.all(
     metricsCatalog.metrics.slice(0, 4).map(async (metric) => {
       const query = new URLSearchParams({
@@ -442,27 +745,40 @@ async function fetchDashboardData(apiBaseUrl: string): Promise<DashboardData> {
       });
 
       return (await fetchJson(
-        `${apiBaseUrl}/api/metrics/series?${query.toString()}`
+        `${apiBaseUrl}/api/metrics/series?${query.toString()}`,
+        signal
       )) as MetricSeriesResponse;
     })
   );
 
   return {
+    agentOverview,
     lastUpdatedAt: null,
     metricSeries,
     metricsCatalog: metricsCatalog.metrics,
     overview,
     sessions: sessions.sessions,
+    toolUsage,
     traces: traces.traces
   };
 }
 
-async function fetchJson(url: string) {
-  const response = await fetch(url);
+async function fetchJson(url: string, signal?: AbortSignal) {
+  const response = await fetch(url, {
+    signal
+  });
 
   if (!response.ok) {
     throw new Error(`Request failed for ${url}`);
   }
 
   return response.json();
+}
+
+function resolveToolBarWidth(
+  callCount: number,
+  tools: Array<{ callCount: number }>
+) {
+  const maxCount = Math.max(1, ...tools.map((tool) => tool.callCount));
+  return Math.max(12, (callCount / maxCount) * 100);
 }

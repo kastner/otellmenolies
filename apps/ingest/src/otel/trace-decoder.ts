@@ -47,15 +47,28 @@ export function extractSpansFromTraceExport(request: {
         const serviceName = resolveServiceName(resourceAttributes);
         const sessionId = resolveSessionId(attributes, resourceAttributes);
         const toolName = resolveToolName(attributes, span.name);
-        const category = resolveCategory(attributes, span.name, toolName, sessionId);
         const startTimeMs = nanosToMilliseconds(span.startTimeUnixNano);
+        const conversationId = resolveConversationId(
+          sessionId,
+          serviceName,
+          startTimeMs,
+          toolName
+        );
+        const category = resolveCategory(attributes, span.name, toolName, sessionId);
         const endTimeMs = nanosToMilliseconds(span.endTimeUnixNano);
+        const inputTokens = resolveTokenCount(attributes, INPUT_TOKEN_KEYS);
+        const outputTokens = resolveTokenCount(attributes, OUTPUT_TOKEN_KEYS);
+        const toolCallId = resolveToolCallId(attributes);
+        const toolArguments = resolveToolArguments(attributes);
 
         const record: SpanRecord = {
           attributes,
           category,
+          conversationId,
           durationMs: Math.max(0, endTimeMs - startTimeMs),
+          inputTokens,
           kind: normalizeEnum(span.kind, "SPAN_KIND_INTERNAL"),
+          outputTokens,
           parentSpanId: bytesToHex(span.parentSpanId),
           resourceAttributes,
           serviceName,
@@ -64,6 +77,8 @@ export function extractSpansFromTraceExport(request: {
           spanName: span.name ?? "unnamed span",
           startTimeMs,
           statusCode: normalizeEnum(span.status?.code, "STATUS_CODE_UNSET"),
+          toolArguments,
+          toolCallId,
           toolName,
           traceId: bytesToHex(span.traceId) ?? `missing-trace-id-${records.length}`
         };
@@ -164,6 +179,23 @@ function resolveSessionId(
   return undefined;
 }
 
+function resolveConversationId(
+  sessionId: string | undefined,
+  serviceName: string,
+  startTimeMs: number,
+  toolName: string | undefined
+) {
+  if (sessionId) {
+    return sessionId;
+  }
+
+  if (toolName) {
+    return `${serviceName}@${Math.floor(startTimeMs / 1_800_000)}`;
+  }
+
+  return undefined;
+}
+
 function resolveToolName(
   attributes: Record<string, unknown>,
   spanName?: string
@@ -180,6 +212,12 @@ function resolveToolName(
 
   if (spanName?.startsWith("tool.")) {
     return spanName.slice("tool.".length);
+  }
+
+  const parsed = parseCodexCallPayload(attributes["call"]);
+
+  if (parsed?.toolName) {
+    return parsed.toolName;
   }
 
   return undefined;
@@ -228,6 +266,57 @@ function resolveCategory(
   return "app";
 }
 
+function resolveTokenCount(
+  attributes: Record<string, unknown>,
+  keys: string[]
+) {
+  for (const key of keys) {
+    const value = attributes[key];
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === "string" && value.length > 0) {
+      const parsed = Number(value);
+
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function resolveToolCallId(attributes: Record<string, unknown>) {
+  for (const key of TOOL_CALL_ID_KEYS) {
+    const value = attributes[key];
+
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+
+  const parsed = parseCodexCallPayload(attributes["call"]);
+  return parsed?.toolCallId;
+}
+
+function resolveToolArguments(attributes: Record<string, unknown>) {
+  for (const key of TOOL_ARGUMENT_KEYS) {
+    const value = attributes[key];
+
+    if (value === undefined || value === null) {
+      continue;
+    }
+
+    return normalizeArgumentPayload(value);
+  }
+
+  const parsed = parseCodexCallPayload(attributes["call"]);
+  return parsed?.toolArguments;
+}
+
 function nanosToMilliseconds(value: string | number | undefined) {
   if (typeof value === "number") {
     return Math.round(value / 1_000_000);
@@ -269,23 +358,108 @@ function shouldRetainSpan(span: SpanRecord) {
     return true;
   }
 
+  if (span.category === "app") {
+    return false;
+  }
+
+  if (
+    span.category === "tool_call" &&
+    CODEX_DUPLICATE_TOOL_SPANS.has(span.spanName) &&
+    !span.toolArguments &&
+    !span.toolCallId
+  ) {
+    return false;
+  }
+
   if (span.category !== "app") {
-    return true;
+    return (
+      span.toolName !== undefined ||
+      span.toolArguments !== undefined ||
+      span.toolCallId !== undefined
+    );
   }
 
-  if (span.durationMs > 2) {
-    return true;
-  }
-
-  return !CODEX_NOISE_SPANS.has(span.spanName);
+  return false;
 }
 
-const CODEX_NOISE_SPANS = new Set([
-  "FramedRead::decode_frame",
-  "Prioritize::queue_frame",
-  "hpack::decode",
-  "poll",
-  "pop_frame",
-  "reserve_capacity",
-  "send_data"
+function normalizeArgumentPayload(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return prettyPrintJsonIfPossible(value);
+  }
+
+  if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
+    return JSON.stringify(value, null, 2);
+  }
+
+  return value === undefined ? undefined : String(value);
+}
+
+function prettyPrintJsonIfPossible(value: string) {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function parseCodexCallPayload(value: unknown) {
+  if (typeof value !== "string" || value.length === 0) {
+    return null;
+  }
+
+  const toolCallId = value.match(/call_id:\s*"([^"]+)"/)?.[1];
+  const toolName = value.match(/tool_name:\s*"([^"]+)"/)?.[1];
+  const encodedArguments = value.match(/arguments:\s*"((?:\\.|[^"])*)"/)?.[1];
+  const rawArguments = encodedArguments
+    ? decodeEscapedString(encodedArguments)
+    : undefined;
+
+  return {
+    toolArguments: rawArguments ? prettyPrintJsonIfPossible(rawArguments) : undefined,
+    toolCallId,
+    toolName
+  };
+}
+
+function decodeEscapedString(value: string) {
+  try {
+    return JSON.parse(`"${value}"`);
+  } catch {
+    return value;
+  }
+}
+
+const CODEX_DUPLICATE_TOOL_SPANS = new Set([
+  "handle_responses"
 ]);
+
+const INPUT_TOKEN_KEYS = [
+  "gen_ai.usage.input_tokens",
+  "usage.input_tokens",
+  "input_tokens",
+  "prompt_tokens"
+];
+
+const OUTPUT_TOKEN_KEYS = [
+  "gen_ai.usage.output_tokens",
+  "usage.output_tokens",
+  "output_tokens",
+  "completion_tokens"
+];
+
+const TOOL_CALL_ID_KEYS = [
+  "tool.call.id",
+  "tool_call_id",
+  "call_id",
+  "gen_ai.tool.call.id",
+  "openai.call_id"
+];
+
+const TOOL_ARGUMENT_KEYS = [
+  "tool.arguments",
+  "tool_arguments",
+  "arguments",
+  "gen_ai.tool.arguments",
+  "openai.tool.arguments",
+  "input"
+];
