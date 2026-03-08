@@ -15,6 +15,7 @@ Local OTLP ingest and dashboards for service telemetry and agent sessions.
 
 - Traces and spans go to SQLite at `data/telemetry.sqlite`
 - Metrics go to `data/metrics/<metric-name>/archive.json`
+- Logs go to daily JSONL files at `data/logs/YYYY-MM-DD.jsonl`
 - Metric retention is chosen on first sight with an OpenAI-backed advisor and falls back to heuristics when the advisor fails
 - The metric archive format is a small ring-buffer style store inspired by Whisper/RRD, not a full TSDB
 
@@ -53,6 +54,7 @@ Environment config:
 - `OPENAI_API_KEY` enables AI-backed metric retention advice.
 - `OPENAI_MODEL` overrides the default model (`gpt-5.4`).
 - `DATA_DIR`, `HOST`, `HTTP_PORT`, `OTLP_GRPC_PORT`, and `PROTO_DIR` override local paths and ports.
+- `LOGS_DIR` overrides the default OTLP log output directory (`data/logs`).
 
 Start the ingest daemon:
 
@@ -91,6 +93,7 @@ Open:
 - Codex traffic is accepted directly on `14317` and shows up as `codex-app-server`
 - Tool calls are detected from Codex `tool_name` attributes
 - Sessions for Codex are synthesized by service plus time bucket because the live spans seen here do not include an explicit session id
+- OTLP logs are persisted as append-only JSONL, one entry per line, with normalized timestamps for easy tailing
 - High-volume low-signal Codex transport spans are filtered to keep the dashboard responsive
 - Existing Codex transport noise is pruned on startup so a previously overloaded local database can recover after restart
 - The OpenAI metric advisor is verified and working at module level; the live daemon still intentionally falls back to heuristics when first-seen profile generation fails under load
@@ -107,6 +110,7 @@ bun run build
 Machine-specific live verification is recorded in [docs/2026-03-07-live-validation.md](/Users/erik.kastner/workspace/meta/otellmenolies/.worktrees/feature-otel-local/docs/2026-03-07-live-validation.md).
 The `.env` documentation correction is recorded in [docs/2026-03-08-bun-env-docs-validation.md](/Users/erik.kastner/workspace/meta/otellmenolies/docs/2026-03-08-bun-env-docs-validation.md).
 The design and implementation notes for the env template update are recorded in [docs/plans/2026-03-08-env-example-design.md](/Users/erik.kastner/workspace/meta/otellmenolies/docs/plans/2026-03-08-env-example-design.md) and [docs/plans/2026-03-08-env-example.md](/Users/erik.kastner/workspace/meta/otellmenolies/docs/plans/2026-03-08-env-example.md).
+The OTLP log ingest validation is recorded in [docs/2026-03-08-otel-logs-validation.md](/Users/erik.kastner/workspace/meta/otellmenolies/docs/2026-03-08-otel-logs-validation.md).
 
 ## Attribution
 

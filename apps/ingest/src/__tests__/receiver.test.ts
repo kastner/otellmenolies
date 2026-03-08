@@ -8,6 +8,9 @@ describe("loadOtelDefinitions", () => {
     const config = createConfig({});
     const definitions = loadOtelDefinitions(config);
 
+    expect(definitions.logsServicePath).toBe(
+      "opentelemetry.proto.collector.logs.v1.LogsService"
+    );
     expect(definitions.traceServicePath).toBe(
       "opentelemetry.proto.collector.trace.v1.TraceService"
     );
@@ -19,6 +22,7 @@ describe("loadOtelDefinitions", () => {
   it("creates handler shapes for both ingest services", () => {
     const shape = createReceiverShape();
 
+    expect(shape.logsHandlers.Export).toBeTypeOf("function");
     expect(shape.traceHandlers.Export).toBeTypeOf("function");
     expect(shape.metricsHandlers.Export).toBeTypeOf("function");
   });

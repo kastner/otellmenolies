@@ -3,6 +3,7 @@ import Fastify from "fastify";
 import { createBufferedIngest } from "./buffered-ingest.js";
 import type { AppConfig } from "./config.js";
 import { registerApiRoutes } from "./http/api.js";
+import { createFileLogStore } from "./logs/file-log-store.js";
 import { createMetricArchiveStore } from "./metrics/archive-store.js";
 import { createMetricProfileAdvisor } from "./metrics/profile-advisor.js";
 import { loadOtelDefinitions } from "./otel/load-protos.js";
@@ -18,6 +19,9 @@ export type AppServer = {
 export function createServer(config: AppConfig): AppServer {
   const definitions = loadOtelDefinitions(config);
   const database = createSqliteDatabase(config.databasePath);
+  const logs = createFileLogStore({
+    logsDir: config.logsDir
+  });
   const spans = createSpanStore(database);
   const metrics = createMetricArchiveStore({
     advisor: createMetricProfileAdvisor({
@@ -27,6 +31,9 @@ export function createServer(config: AppConfig): AppServer {
     dataDir: config.dataDir
   });
   const ingestBuffer = createBufferedIngest({
+    flushLogs: async (logExport) => {
+      await logs.ingestLogs(logExport);
+    },
     flushMetrics: async (metricExport) => {
       await metrics.ingestMetrics(metricExport);
     },
@@ -35,6 +42,9 @@ export function createServer(config: AppConfig): AppServer {
     }
   });
   const receiver = createReceiverShape({
+    ingestLogExport: (logExport) => {
+      ingestBuffer.enqueueLogs(logExport);
+    },
     ingestMetricExport: (metricExport) => {
       ingestBuffer.enqueueMetrics(metricExport);
     },
@@ -56,6 +66,7 @@ export function createServer(config: AppConfig): AppServer {
     ok: true
   }));
 
+  grpcServer.addService(definitions.logsDefinition.service, receiver.logsHandlers);
   grpcServer.addService(definitions.traceDefinition.service, receiver.traceHandlers);
   grpcServer.addService(
     definitions.metricsDefinition.service,

@@ -13,6 +13,8 @@ const LOADER_OPTIONS: protoLoader.Options = {
 
 export type OtelDefinitions = {
   grpcObject: grpc.GrpcObject;
+  logsDefinition: grpc.ServiceClientConstructor;
+  logsServicePath: string;
   metricsDefinition: grpc.ServiceClientConstructor;
   metricsServicePath: string;
   packageDefinition: protoLoader.PackageDefinition;
@@ -23,6 +25,10 @@ export type OtelDefinitions = {
 export function loadOtelDefinitions(config: AppConfig): OtelDefinitions {
   const includeDirs = [config.protoDir];
   const protoFiles = [
+    path.join(
+      config.protoDir,
+      "opentelemetry/proto/collector/logs/v1/logs_service.proto"
+    ),
     path.join(
       config.protoDir,
       "opentelemetry/proto/collector/metrics/v1/metrics_service.proto"
@@ -37,15 +43,19 @@ export function loadOtelDefinitions(config: AppConfig): OtelDefinitions {
     includeDirs
   });
   const grpcObject = grpc.loadPackageDefinition(packageDefinition);
+  const logsServicePath = "opentelemetry.proto.collector.logs.v1.LogsService";
   const traceServicePath =
     "opentelemetry.proto.collector.trace.v1.TraceService";
   const metricsServicePath =
     "opentelemetry.proto.collector.metrics.v1.MetricsService";
+  const logsDefinition = getServiceDefinition(grpcObject, logsServicePath);
   const traceDefinition = getServiceDefinition(grpcObject, traceServicePath);
   const metricsDefinition = getServiceDefinition(grpcObject, metricsServicePath);
 
   return {
     grpcObject,
+    logsDefinition,
+    logsServicePath,
     metricsDefinition,
     metricsServicePath,
     packageDefinition,
