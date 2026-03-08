@@ -2,12 +2,12 @@ import type { LogRecord } from "./types.js";
 
 type OtlpAttribute = {
   key?: string;
-  value?: Record<string, unknown>;
+  value?: Record<string, unknown> | null;
 };
 
 type OtlpLogRecord = {
   attributes?: OtlpAttribute[];
-  body?: Record<string, unknown>;
+  body?: Record<string, unknown> | null;
   observedTimeUnixNano?: string | number;
   severityNumber?: number | string;
   severityText?: string;
@@ -43,7 +43,7 @@ export function extractLogsFromExport(request: {
         const observedTimestampMs =
           logRecord.observedTimeUnixNano === undefined
             ? undefined
-            : nanosToMilliseconds(logRecord.observedTimeUnixNano);
+            : maybeNanosToMilliseconds(logRecord.observedTimeUnixNano);
 
         records.push({
           attributes: attributeListToRecord(logRecord.attributes ?? []),
@@ -90,7 +90,11 @@ function attributeListToRecord(attributes: OtlpAttribute[]) {
   return record;
 }
 
-function anyValueToPrimitive(value: Record<string, unknown>): unknown {
+function anyValueToPrimitive(value: Record<string, unknown> | null | undefined): unknown {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
   if ("stringValue" in value) {
     return value.stringValue;
   }
@@ -138,23 +142,37 @@ function resolveTimestampMs(
   timeUnixNano?: string | number,
   observedTimeUnixNano?: string | number
 ) {
-  if (timeUnixNano !== undefined) {
-    return nanosToMilliseconds(timeUnixNano);
+  const eventTimestampMs = maybeNanosToMilliseconds(timeUnixNano);
+
+  if (eventTimestampMs !== undefined && eventTimestampMs > 0) {
+    return eventTimestampMs;
   }
 
-  if (observedTimeUnixNano !== undefined) {
-    return nanosToMilliseconds(observedTimeUnixNano);
+  const observedTimestampMs = maybeNanosToMilliseconds(observedTimeUnixNano);
+
+  if (observedTimestampMs !== undefined && observedTimestampMs > 0) {
+    return observedTimestampMs;
   }
 
   return Date.now();
 }
 
-function nanosToMilliseconds(value: string | number) {
-  if (typeof value === "number") {
-    return Math.round(value / 1_000_000);
+function maybeNanosToMilliseconds(value: string | number | undefined) {
+  if (value === undefined) {
+    return undefined;
   }
 
-  return Math.round(Number(value) / 1_000_000);
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? Math.round(value / 1_000_000) : undefined;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  return Math.round(parsed / 1_000_000);
 }
 
 function maybeNumber(value: number | string | undefined) {

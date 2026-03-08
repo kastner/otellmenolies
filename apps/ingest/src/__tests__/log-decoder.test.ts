@@ -82,6 +82,87 @@ describe("log export decoding", () => {
     });
   });
 
+  it("tolerates null OTLP any values without crashing", () => {
+    const request = {
+      resourceLogs: [
+        {
+          resource: {
+            attributes: [
+              {
+                key: "service.name",
+                value: {
+                  stringValue: "codex-app-server"
+                }
+              }
+            ]
+          },
+          scopeLogs: [
+            {
+              logRecords: [
+                {
+                  attributes: [
+                    {
+                      key: "event.name",
+                      value: null
+                    }
+                  ],
+                  body: null,
+                  severityText: "ERROR",
+                  timeUnixNano: "1000000"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+
+    expect(() => extractLogsFromExport(request)).not.toThrow();
+    expect(extractLogsFromExport(request)[0]).toMatchObject({
+      attributes: {},
+      body: null,
+      serviceName: "codex-app-server",
+      severityText: "ERROR",
+      timestampMs: 1
+    });
+  });
+
+  it("falls back to observed time when log time is zero", () => {
+    const request = {
+      resourceLogs: [
+        {
+          resource: {
+            attributes: [
+              {
+                key: "service.name",
+                value: {
+                  stringValue: "codex-app-server"
+                }
+              }
+            ]
+          },
+          scopeLogs: [
+            {
+              logRecords: [
+                {
+                  body: null,
+                  observedTimeUnixNano: "1772932592015002000",
+                  severityText: "INFO",
+                  timeUnixNano: "0"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+
+    expect(extractLogsFromExport(request)[0]).toMatchObject({
+      observedTimestampMs: 1_772_932_592_015,
+      timestampMs: 1_772_932_592_015
+    });
+  });
+
   it("passes decoded log entries into the configured ingest callback", async () => {
     const ingestLogExport = vi.fn();
     const receiver = createReceiverShape({

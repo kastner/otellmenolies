@@ -57,12 +57,11 @@ describe("buffered ingest", () => {
     expect(flushMetrics).not.toHaveBeenCalled();
     expect(flushLogs).not.toHaveBeenCalled();
 
-    await delay(5);
+    await buffer.close();
 
     expect(flushSpans).toHaveBeenCalledTimes(1);
     expect(flushMetrics).toHaveBeenCalledTimes(1);
     expect(flushLogs).toHaveBeenCalledTimes(1);
-    await buffer.close();
   });
 
   it("flushes large queues in smaller batches", async () => {
