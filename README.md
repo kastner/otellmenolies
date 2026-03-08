@@ -33,12 +33,30 @@ Install once:
 bun install
 ```
 
+Create an env file from the template:
+
+```bash
+cp .env.example .env
+```
+
+You can also copy it to one of Bun's other built-in env filenames:
+
+```bash
+cp .env.example .env.local
+cp .env.example .env.development
+```
+
+Environment config:
+
+- Bun automatically loads `.env`, `.env.$NODE_ENV`, and `.env.local` for `bun run ...`.
+- Use `.env` for shared local defaults, `.env.$NODE_ENV` for environment-specific overrides, and `.env.local` for machine-specific overrides with the highest precedence.
+- `OPENAI_API_KEY` enables AI-backed metric retention advice.
+- `OPENAI_MODEL` overrides the default model (`gpt-5.4`).
+- `DATA_DIR`, `HOST`, `HTTP_PORT`, `OTLP_GRPC_PORT`, and `PROTO_DIR` override local paths and ports.
+
 Start the ingest daemon:
 
 ```bash
-set -a
-source .env
-set +a
 bun run dev:ingest
 ```
 
@@ -87,6 +105,8 @@ bun run build
 ```
 
 Machine-specific live verification is recorded in [docs/2026-03-07-live-validation.md](/Users/erik.kastner/workspace/meta/otellmenolies/.worktrees/feature-otel-local/docs/2026-03-07-live-validation.md).
+The `.env` documentation correction is recorded in [docs/2026-03-08-bun-env-docs-validation.md](/Users/erik.kastner/workspace/meta/otellmenolies/docs/2026-03-08-bun-env-docs-validation.md).
+The design and implementation notes for the env template update are recorded in [docs/plans/2026-03-08-env-example-design.md](/Users/erik.kastner/workspace/meta/otellmenolies/docs/plans/2026-03-08-env-example-design.md) and [docs/plans/2026-03-08-env-example.md](/Users/erik.kastner/workspace/meta/otellmenolies/docs/plans/2026-03-08-env-example.md).
 
 ## Attribution
 
