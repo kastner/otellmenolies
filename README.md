@@ -5,7 +5,7 @@ Local OTLP ingest and dashboards for service telemetry and agent sessions.
 ## What is here
 
 - `apps/ingest`: OTLP/gRPC receiver on `127.0.0.1:14317` and HTTP API on `127.0.0.1:14318`
-- `apps/dashboard`: Vite/React dashboard on `127.0.0.1:14319` in dev
+- `apps/dashboard`: Vite/React dashboard on `http://localhost:5173/` in default dev
 - `packages/shared`: shared formatting helpers used by the dashboard
 - `packages/proto`: vendored official OpenTelemetry protobuf definitions
 - `docs/plans`: design and implementation records
@@ -42,15 +42,21 @@ set +a
 bun run dev:ingest
 ```
 
-Start the dashboard:
+Start the dashboard on the default Vite dev port:
 
 ```bash
-bun run --filter @otellmenolies/dashboard dev --host 127.0.0.1 --port 14319
+bun run dev:dashboard
+```
+
+Or start both apps together:
+
+```bash
+bun run dev
 ```
 
 Open:
 
-- Dashboard: `http://127.0.0.1:14319`
+- Dashboard: `http://localhost:5173/`
 - Ingest health: `http://127.0.0.1:14318/health`
 
 ## Useful API routes
@@ -68,6 +74,7 @@ Open:
 - Tool calls are detected from Codex `tool_name` attributes
 - Sessions for Codex are synthesized by service plus time bucket because the live spans seen here do not include an explicit session id
 - High-volume low-signal Codex transport spans are filtered to keep the dashboard responsive
+- Existing Codex transport noise is pruned on startup so a previously overloaded local database can recover after restart
 - The OpenAI metric advisor is verified and working at module level; the live daemon still intentionally falls back to heuristics when first-seen profile generation fails under load
 
 ## Verification
