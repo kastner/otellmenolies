@@ -81,6 +81,46 @@ Open:
 - Dashboard: `http://localhost:5173/`
 - Ingest health: `http://127.0.0.1:14318/health`
 
+## Enable telemetry from agent clients
+
+Start the ingest daemon first with `bun run dev:ingest` or `bun run dev`, then point your agent client at `http://localhost:14317`.
+
+### Codex CLI and the Codex IDE extension in Cursor
+
+OpenAI's Codex IDE extension is available in Cursor, and the local setup here uses the shared Codex config file at `~/.codex/config.toml`.
+
+Add:
+
+```toml
+[otel]
+enabled = true
+environment = "local"
+log_user_prompt = false
+
+[otel.exporter.otlp-grpc]
+endpoint = "http://localhost:14317"
+tool_output_token_limit = 25000
+```
+
+Restart Codex or Cursor after updating the file.
+
+### Claude Code
+
+Launch Claude Code with OTEL env vars enabled:
+
+```bash
+CLAUDE_CODE_ENABLE_TELEMETRY=1 \
+OTEL_EXPORTER_OTLP_ENDPOINT='http://localhost:14317' \
+OTEL_METRICS_EXPORTER=otlp \
+OTEL_LOGS_EXPORTER=otlp \
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
+OTEL_LOGS_EXPORT_INTERVAL=1000 \
+OTEL_METRIC_EXPORT_INTERVAL=1000 \
+claude
+```
+
+If you run Claude Code from the Cursor extension, set the same values in `claudeCode.environmentVariables` instead of only in your shell.
+
 ## Useful API routes
 
 - `GET /health`
@@ -92,13 +132,14 @@ Open:
 
 ## Current behavior notes
 
-- Codex traffic is accepted directly on `14317` and shows up as `codex-app-server`
-- Tool calls are detected from Codex `tool_name` attributes
-- Sessions for Codex are synthesized by service plus time bucket because the live spans seen here do not include an explicit session id
-- OTLP logs are persisted as append-only JSONL, one entry per line, with normalized timestamps for easy tailing
-- High-volume low-signal Codex transport spans are filtered to keep the dashboard responsive
-- Existing Codex transport noise is pruned on startup so a previously overloaded local database can recover after restart
-- The OpenAI metric advisor is verified and working at module level; the live daemon still intentionally falls back to heuristics when first-seen profile generation fails under load
+- The ingest daemon accepts OTLP traces, metrics, and logs on `127.0.0.1:14317`, then serves the dashboard/query API on `127.0.0.1:14318`.
+- Session and conversation grouping use standard attributes first: `gen_ai.session.id`, `session.id`, `conversation.id`, then `thread.id`.
+- If an agent exporter omits an explicit session id, tool-bearing spans fall back to a synthetic conversation bucket based on service and time. This is the current Codex fallback path.
+- Tool calls are inferred from common OTEL/GenAI attributes and from Codex `call` payloads, so both Codex and Claude-style exports show up in the agent views.
+- Token counts are backfilled from common usage attributes into the unified `agent_events` table for dashboard rollups.
+- OTLP logs are stored as daily JSONL files in `data/logs/YYYY-MM-DD.jsonl`, using event time when present and observed time when exporters send `timeUnixNano=0`.
+- High-volume `codex-app-server` transport noise is filtered during ingest and pruned on startup so the dashboard stays responsive under live Codex traffic.
+- First-seen metric retention still prefers the OpenAI advisor and falls back to heuristics when profile generation fails.
 
 ## Verification
 
@@ -112,10 +153,14 @@ bun run build
 `bun run test` and `bun run lint` stay source-first and should not create `dist` output for `apps/ingest` or `packages/shared`.
 `bun run build` still produces the explicit Vite bundle for `apps/dashboard`.
 
-Machine-specific live verification is recorded in [docs/2026-03-07-live-validation.md](/Users/erik.kastner/workspace/meta/otellmenolies/.worktrees/feature-otel-local/docs/2026-03-07-live-validation.md).
-The `.env` documentation correction is recorded in [docs/2026-03-08-bun-env-docs-validation.md](/Users/erik.kastner/workspace/meta/otellmenolies/docs/2026-03-08-bun-env-docs-validation.md).
-The design and implementation notes for the env template update are recorded in [docs/plans/2026-03-08-env-example-design.md](/Users/erik.kastner/workspace/meta/otellmenolies/docs/plans/2026-03-08-env-example-design.md) and [docs/plans/2026-03-08-env-example.md](/Users/erik.kastner/workspace/meta/otellmenolies/docs/plans/2026-03-08-env-example.md).
-The OTLP log ingest validation is recorded in [docs/2026-03-08-otel-logs-validation.md](/Users/erik.kastner/workspace/meta/otellmenolies/docs/2026-03-08-otel-logs-validation.md).
+Supporting notes:
+
+- [docs/2026-03-07-live-validation.md](docs/2026-03-07-live-validation.md)
+- [docs/2026-03-08-bun-env-docs-validation.md](docs/2026-03-08-bun-env-docs-validation.md)
+- [docs/2026-03-08-otel-logs-validation.md](docs/2026-03-08-otel-logs-validation.md)
+- [docs/2026-03-08-readme-github-validation.md](docs/2026-03-08-readme-github-validation.md)
+- [docs/plans/2026-03-08-env-example-design.md](docs/plans/2026-03-08-env-example-design.md)
+- [docs/plans/2026-03-08-env-example.md](docs/plans/2026-03-08-env-example.md)
 
 ## Attribution
 
