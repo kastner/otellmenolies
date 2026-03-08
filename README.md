@@ -6,7 +6,7 @@ Local OTLP ingest and dashboards for service telemetry and agent sessions.
 
 - `apps/ingest`: OTLP/gRPC receiver on `127.0.0.1:14317` and HTTP API on `127.0.0.1:14318`
 - `apps/dashboard`: Vite/React dashboard on `http://localhost:5173/` in default dev
-- `packages/shared`: shared formatting helpers used by the dashboard
+- `packages/shared`: shared formatting helpers used by the dashboard, imported directly from TypeScript source in local Bun workflows
 - `packages/proto`: vendored official OpenTelemetry protobuf definitions
 - `docs/plans`: design and implementation records
 - `docs`: live validation notes
@@ -62,6 +62,8 @@ Start the ingest daemon:
 bun run dev:ingest
 ```
 
+The ingest daemon runs directly from `src/index.ts` under Bun watch mode; no local `dist` build is required.
+
 Start the dashboard on the default Vite dev port:
 
 ```bash
@@ -106,6 +108,9 @@ Workspace verification:
 bun run test
 bun run build
 ```
+
+`bun run test` and `bun run lint` stay source-first and should not create `dist` output for `apps/ingest` or `packages/shared`.
+`bun run build` still produces the explicit Vite bundle for `apps/dashboard`.
 
 Machine-specific live verification is recorded in [docs/2026-03-07-live-validation.md](/Users/erik.kastner/workspace/meta/otellmenolies/.worktrees/feature-otel-local/docs/2026-03-07-live-validation.md).
 The `.env` documentation correction is recorded in [docs/2026-03-08-bun-env-docs-validation.md](/Users/erik.kastner/workspace/meta/otellmenolies/docs/2026-03-08-bun-env-docs-validation.md).
