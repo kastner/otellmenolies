@@ -41,16 +41,20 @@ export function registerApiRoutes(
     if (origin && allowedOriginPattern.test(origin)) {
       setCorsHeaders(request.headers["access-control-request-headers"], origin, reply);
     }
+  });
 
-    if (request.method === "OPTIONS") {
-      if (origin && allowedOriginPattern.test(origin)) {
-        return reply.code(204).send();
-      }
+  app.options("*", async (request, reply) => {
+    const origin = request.headers.origin;
 
-      return reply.code(403).send({
-        error: "Origin not allowed"
-      });
+    if (origin && allowedOriginPattern.test(origin)) {
+      setCorsHeaders(request.headers["access-control-request-headers"], origin, reply);
+      reply.code(204).send();
+      return;
     }
+
+    reply.code(403).send({
+      error: "Origin not allowed"
+    });
   });
 
   app.get("/api/overview", async (request) => {

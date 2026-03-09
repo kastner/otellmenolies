@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "bun:test";
 import { createBufferedIngest } from "../buffered-ingest.js";
 
 describe("buffered ingest", () => {

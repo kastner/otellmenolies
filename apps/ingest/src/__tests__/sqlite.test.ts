@@ -2,8 +2,8 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import Database from "better-sqlite3";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Database } from "bun:sqlite";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createSqliteDatabase } from "../storage/sqlite.js";
 
 describe("sqlite migrations", () => {
@@ -167,5 +167,113 @@ describe("sqlite migrations", () => {
     ]);
 
     reopened.close();
+  });
+
+  it("binds existing plain named-parameter objects under Bun", () => {
+    const databasePath = path.join(tempDir, "telemetry.sqlite");
+    const database = createSqliteDatabase(databasePath);
+
+    database
+      .prepare(
+        `
+          INSERT INTO spans (
+            trace_id,
+            span_id,
+            parent_span_id,
+            service_name,
+            span_name,
+            kind,
+            category,
+            start_time_ms,
+            duration_ms,
+            status_code,
+            session_id,
+            conversation_id,
+            input_tokens,
+            output_tokens,
+            tool_name,
+            tool_call_id,
+            tool_arguments,
+            peer_service,
+            attributes_json,
+            resource_attributes_json
+          ) VALUES (
+            @traceId,
+            @spanId,
+            @parentSpanId,
+            @serviceName,
+            @spanName,
+            @kind,
+            @category,
+            @startTimeMs,
+            @durationMs,
+            @statusCode,
+            @sessionId,
+            @conversationId,
+            @inputTokens,
+            @outputTokens,
+            @toolName,
+            @toolCallId,
+            @toolArguments,
+            @peerService,
+            @attributesJson,
+            @resourceAttributesJson
+          )
+        `
+      )
+      .run({
+        attributesJson: JSON.stringify({
+          key: "value"
+        }),
+        category: "tool_call",
+        conversationId: "conv-1",
+        durationMs: 15,
+        inputTokens: 10,
+        kind: "SPAN_KIND_INTERNAL",
+        outputTokens: 12,
+        parentSpanId: null,
+        peerService: "peer",
+        resourceAttributesJson: JSON.stringify({
+          service: "worker"
+        }),
+        serviceName: "svc",
+        sessionId: "sess-1",
+        spanId: "span-1",
+        spanName: "exec_command",
+        startTimeMs: 1234,
+        statusCode: "STATUS_CODE_UNSET",
+        toolArguments: "{\"cmd\":\"pwd\"}",
+        toolCallId: "call-1",
+        toolName: "exec_command",
+        traceId: "trace-1"
+      });
+
+    const inserted = database
+      .prepare(
+        `
+          SELECT
+            trace_id AS traceId,
+            span_id AS spanId,
+            conversation_id AS conversationId,
+            tool_name AS toolName
+          FROM spans
+          WHERE span_id = ?
+        `
+      )
+      .get("span-1") as {
+      conversationId: string | null;
+      spanId: string;
+      toolName: string | null;
+      traceId: string;
+    };
+
+    expect(inserted).toEqual({
+      conversationId: "conv-1",
+      spanId: "span-1",
+      toolName: "exec_command",
+      traceId: "trace-1"
+    });
+
+    database.close();
   });
 });

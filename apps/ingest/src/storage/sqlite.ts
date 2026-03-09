@@ -1,15 +1,50 @@
 import fs from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 
-export type SqliteDatabase = Database.Database;
+type SqliteBindings = Record<string, unknown>;
+type SqliteStatement = {
+  all: (...params: unknown[]) => unknown[];
+  get: (...params: unknown[]) => unknown;
+  run: (...params: unknown[]) => {
+    changes: number;
+    lastInsertRowid: number | bigint;
+  };
+};
+
+export type SqliteDatabase = {
+  close: () => void;
+  exec: (sql: string) => void;
+  prepare: (sql: string) => SqliteStatement;
+  transaction: <TArgs extends unknown[], TResult>(
+    callback: (...args: TArgs) => TResult
+  ) => (...args: TArgs) => TResult;
+};
+
+type RawSqliteStatement = {
+  all: (...params: unknown[]) => unknown[];
+  get: (...params: unknown[]) => unknown;
+  run: (...params: unknown[]) => {
+    changes: number;
+    lastInsertRowid: number | bigint;
+  };
+};
+
+type RawSqliteDatabase = {
+  close: () => void;
+  exec: (sql: string) => void;
+  prepare: (sql: string) => RawSqliteStatement;
+  transaction: <TArgs extends unknown[], TResult>(
+    callback: (...args: TArgs) => TResult
+  ) => (...args: TArgs) => TResult;
+};
 
 export function createSqliteDatabase(filePath: string): SqliteDatabase {
   fs.mkdirSync(path.dirname(filePath), {
     recursive: true
   });
 
-  const database = new Database(filePath);
+  const database = wrapDatabase(new Database(filePath) as unknown as RawSqliteDatabase);
 
   database.exec(`
     PRAGMA journal_mode = WAL;
@@ -129,6 +164,67 @@ function pruneCodexNoise(database: SqliteDatabase) {
     .run().changes;
 
   if (removedRows > 0) {
-    database.pragma("wal_checkpoint(TRUNCATE)");
+    database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   }
+}
+
+function wrapDatabase(database: RawSqliteDatabase): SqliteDatabase {
+  return {
+    close() {
+      database.close();
+    },
+    exec(sql) {
+      database.exec(sql);
+    },
+    prepare(sql) {
+      return wrapStatement(database.prepare(sql));
+    },
+    transaction(callback) {
+      return database.transaction(callback);
+    }
+  };
+}
+
+function wrapStatement(statement: RawSqliteStatement): SqliteStatement {
+  return {
+    all(...params) {
+      return statement.all(...normalizeParameters(params));
+    },
+    get(...params) {
+      return statement.get(...normalizeParameters(params));
+    },
+    run(...params) {
+      return statement.run(...normalizeParameters(params));
+    }
+  };
+}
+
+function normalizeParameters(params: unknown[]) {
+  if (params.length !== 1 || !isPlainObject(params[0])) {
+    return params;
+  }
+
+  return [normalizeBindings(params[0])];
+}
+
+function isPlainObject(value: unknown): value is SqliteBindings {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeBindings(bindings: SqliteBindings) {
+  const normalized: SqliteBindings = {};
+
+  for (const [key, value] of Object.entries(bindings)) {
+    normalized[key] = value;
+
+    if (key.startsWith("@") || key.startsWith("$") || key.startsWith(":")) {
+      continue;
+    }
+
+    normalized[`@${key}`] = value;
+    normalized[`$${key}`] = value;
+    normalized[`:${key}`] = value;
+  }
+
+  return normalized;
 }

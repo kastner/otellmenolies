@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "bun:test";
 import { extractMetricsFromExport } from "../metrics/metric-decoder.js";
 import { createReceiverShape } from "../otel/receiver.js";
 
