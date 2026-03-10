@@ -110,7 +110,6 @@ function bindGrpcServer(server: grpc.Server, host: string, port: number) {
           return;
         }
 
-        server.start();
         resolve(boundPort);
       }
     );

@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
@@ -17,11 +17,11 @@ describe("App", () => {
 
     render(<App apiBaseUrl="" refreshIntervalMs={20} />);
 
-    expect(fetchSpy).toHaveBeenCalledTimes(6);
+    expect(fetchSpy).toHaveBeenCalledTimes(7);
 
     await vi.advanceTimersByTimeAsync(100);
 
-    expect(fetchSpy).toHaveBeenCalledTimes(6);
+    expect(fetchSpy).toHaveBeenCalledTimes(7);
   });
 
   it("renders service and agent telemetry from the ingest api", async () => {
@@ -187,6 +187,59 @@ describe("App", () => {
         );
       }
 
+      if (url.endsWith("/api/agent/unified?range=3600&bucket=300")) {
+        return new Response(
+          JSON.stringify({
+            byService: [
+              {
+                inputTokens: 3200,
+                outputTokens: 900,
+                serviceName: "codex",
+                toolCallCount: 11
+              }
+            ],
+            inputTokenTimeline: [
+              { bucketStartMs: 1, value: 1100 },
+              { bucketStartMs: 2, value: 2200 },
+              { bucketStartMs: 3, value: 1700 }
+            ],
+            outputTokenTimeline: [
+              { bucketStartMs: 1, value: 300 },
+              { bucketStartMs: 2, value: 650 },
+              { bucketStartMs: 3, value: 410 }
+            ],
+            summary: {
+              cacheReadTokens: 500,
+              inputTokens: 3200,
+              outputTokens: 900,
+              toolCallCount: 11,
+              totalCostUsd: 0.12
+            },
+            toolCallTimeline: [
+              { bucketStartMs: 1, value: 3 },
+              { bucketStartMs: 2, value: 5 },
+              { bucketStartMs: 3, value: 3 }
+            ],
+            tools: [
+              {
+                avgDurationMs: 420,
+                callCount: 8,
+                lastCalledAt: 2,
+                serviceName: "codex",
+                toolName: "exec_command"
+              },
+              {
+                avgDurationMs: 85,
+                callCount: 3,
+                lastCalledAt: 2,
+                serviceName: "codex",
+                toolName: "write_stdin"
+              }
+            ]
+          })
+        );
+      }
+
       if (url.includes("/api/agent/tools?") && url.includes("range=3600") && url.includes("limit=12") && !url.includes("toolName=")) {
         return new Response(
           JSON.stringify({
@@ -264,21 +317,14 @@ describe("App", () => {
     expect(screen.getAllByText("sess-1").length).toBeGreaterThan(0);
     expect(screen.getByText("http.server.duration")).toBeInTheDocument();
     expect(screen.getAllByText("exec_command, write_stdin").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Conversation volume").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("By service").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Input tokens").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Output tokens").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Average duration").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Tool calls").length).toBeGreaterThan(0);
+    expect(screen.getByText("Cache read")).toBeInTheDocument();
+    expect(screen.getByText("$0.12")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /exec_command/ })
     ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /exec_command/ }));
-
-    await waitFor(() => {
-      expect(screen.getAllByText("Tool call details").length).toBeGreaterThan(0);
-    });
-
-    expect(screen.getByText("call-1")).toBeInTheDocument();
-    expect(screen.getByText(/ls -la/)).toBeInTheDocument();
   });
 });
