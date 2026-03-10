@@ -17,6 +17,8 @@ export type AppServer = {
   start: () => Promise<void>;
 };
 
+const GRPC_MAX_RECEIVE_MESSAGE_LENGTH = 32 * 1024 * 1024;
+
 export function createServer(config: AppConfig): AppServer {
   const definitions = loadOtelDefinitions(config);
   const database = createSqliteDatabase(config.databasePath);
@@ -56,7 +58,9 @@ export function createServer(config: AppConfig): AppServer {
       ingestBuffer.enqueueSpans(traceExport);
     }
   });
-  const grpcServer = new grpc.Server();
+  const grpcServer = new grpc.Server({
+    "grpc.max_receive_message_length": GRPC_MAX_RECEIVE_MESSAGE_LENGTH
+  });
   const httpServer = Fastify();
 
   registerApiRoutes(httpServer, {
